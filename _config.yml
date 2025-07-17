@@ -2,3 +2,4 @@ remote_theme: daattali/beautiful-jekyll@6.0.1
 plugins:
 - jekyll-remote-theme 
 author: vablings
+permalink: /:categories/:title/
