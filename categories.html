@@ -11,19 +11,24 @@ title: Categories
     <div id="#{{ category_name | slugize }}"></div>
     <p></p>
 
+    <!-- Category Heading -->
     <h3 class="category-head">{{ category_name }}</h3>
     <a name="{{ category_name | slugize }}"></a>
 
+    <!-- Conditional Description -->
     {% if category_name == "Engineering Manufacturing Technician" %}
-    <p>
-      Below is the blog series for my time as an Engineering Manufacturing Technician. Most of the work documented was to suit the requrements for my level 4 qualifcation
-    </p>
+      <p class="category-description">
+        Below is the blog series for my time as an Engineering Manufacturing Technician. 
+        Most of the work documented was to suit the requirements for my Level 4 qualification, the dates are not accurate as they were all submitted as a block of work
+        After the submittion of work it was graded as Distinction which is the highest marks for this body of work (eg: A)
+      </p>
     {% endif %}
 
+    <!-- List Posts in This Category -->
     {% for post in site.categories[category_name] %}
-    <article class="archive-item">
-      <h4><a href="{{ site.baseurl }}{{ post.url }}">{{ post.title }}</a></h4>
-    </article>
+      <article class="archive-item">
+        <h4><a href="{{ site.baseurl }}{{ post.url }}">{{ post.title }}</a></h4>
+      </article>
     {% endfor %}
   </div>
 {% endfor %}
