@@ -10,3 +10,5 @@ navbar-links:
   Home: ""
   Categories: "categories"
   About: "about"
+
+navbar-links-align: left
