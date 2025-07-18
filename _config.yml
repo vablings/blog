@@ -1,4 +1,4 @@
-remote_theme: renyuanz/leonids
+remote_theme: daattali/beautiful-jekyll@6.0.1
 plugins:
 - jekyll-remote-theme 
 author: vablings
@@ -10,5 +10,3 @@ navbar-links:
   Home: ""
   Categories: "categories"
   About: "about"
-
-navbar-links-align: left
