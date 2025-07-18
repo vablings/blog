@@ -1,4 +1,4 @@
-remote_theme: daviddarnes/alembic@4.1.0
+remote_theme: renyuanz/leonids
 plugins:
 - jekyll-remote-theme 
 author: vablings
