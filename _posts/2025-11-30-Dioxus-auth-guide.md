@@ -3,6 +3,7 @@ title: "Creating a Dioxus fullstack application with Auth"
 date: 2025-11-30
 ---
 
+
 # How to make a fullstack dioxus application with Auth
 Just some notes before we begin, This example is using sqlx + sqlite as my example. Under `axum_auth_slqx` there is a feature flag for each major database that sqlx supports so you can configure as you want. The important thing is to get a simple grasp of the high level concepts here and once you understand it you wont have much trouble swapping out say Sqlite for Postgres
 
@@ -332,7 +333,7 @@ pub static DB: OnceCell<Pool<Sqlite>> = OnceCell::const_new();
 async fn db() -> Pool<Sqlite> {
     use sqlx::SqlitePool;
 
-    let pool = sqlx::sqlite::SqlitePool::connect("sqlite://wos.db?mode=rwc")
+    let pool = sqlx::sqlite::SqlitePool::connect("sqlite://fullstack.db?mode=rwc")
         .await
         .unwrap();
 
@@ -451,12 +452,13 @@ create table if not exists users
 (
     id integer primary key not null,
     username text not null unique,
-    password text not null,
+    password text not null
 );
 
 -- Insert "guest" user.
 insert into users (id, username, password)
-values (1, 'guest','guest','thispasswordisimpossibletoinsert');
+values (1, 'guest','thispasswordisimpossibletoinsert');
+
 ```
 Note here that we plan to use password hashing so it will be impossible for any user to directly log into the guest user. It will be the default user (userid = 1) so it must exists hence why we create it during the migration.
 
@@ -516,9 +518,215 @@ Go ahead and create our new `api.rs`
 ```rs
 //api.rs
 
-#[post("/api/user/login", auth: Session)]
-pub async fn login(username: String, password: String) -> Result<String, HttpError> {
+#[post("/api/user/register", auth: Session)]
+pub async fn register(
+    username: String, password: String, confirm_password: String,
+) -> Result<String, HttpError> {
     ...
 }
 ```
-So notice here we have used the extractor to insert our session into the query. with `auth: Session` This is pretty much an argument to our function that is always called, it will always be present so we can make use of it get information about our users session.
+So notice here we have used the extractor to insert our session into the query. with `auth: Session` This is pretty much an argument to our function that is always saturated by our extractor, it will always be present so we can make use of it get information about our users session.
+
+
+Okay so now we can see how the extractors work lets make a basic register function that creates us a new user account 
+
+```rs
+//api.rs
+use dioxus::prelude::*;
+
+#[cfg(feature = "server")]
+use crate::layer::Session;
+
+#[post("/api/user/register", auth: Session)]
+pub async fn register(
+    username: String, password: String, confirm_password: String,
+) -> Result<String, HttpError> {
+    use crate::layer::SqlUser;
+    use crate::db::get_db;
+
+    let pool = get_db().await.clone();
+
+    let rows: Vec<SqlUser> = sqlx::query_as("SELECT * FROM users WHERE username = $1")
+        .bind(&username)
+        .fetch_all(&pool)
+        .await
+        .unwrap(); 
+
+    if rows.len() != 0 {
+        return HttpError::bad_request("User already exists!");
+    } else {
+        let hash = password_auth::generate_hash(password);
+        let rowid = sqlx::query("INSERT INTO users (username, password) VALUES (?1, ?2)")
+            .bind(&username)
+            .bind(&hash)
+            .bind(2)
+            .execute(&pool)
+            .await
+            .unwrap()
+            .last_insert_rowid();
+        auth.login_user(rowid);
+        Ok("Logged in!".to_string())
+    }
+}
+
+```
+
+So first we need to query our database to see if the username already exists. We can just return early a bad request. Since we are making use of `HttpError` we can actually pass a string into our error code and it supports `Display` meaning that later on we can reactively place the error somewhere on the webpage showing both the status code and also the inner error text value, Very ergonomic
+
+At this point you should probably add some other checks such as password length requirements. In this example im just going to ensure that password, and confirm_password match 
+
+
+```rs
+//api.rs
+...
+if password != confirm_password {
+    return HttpError::bad_request("Passwords do not match!");
+}
+...
+```
+
+I am not 100% sure if its best to do these kinds of checks on the server rather than checking them in the dioxus hooks later for the front end but it doesn't really matter for this application and we can deal with that error very easily.
+
+Now that we have our register endpoint we can now create a component that submits the data to our server.
+
+```rs
+//main.rs
+
+#[derive(Debug, Clone, Routable, PartialEq)]
+#[rustfmt::skip]
+enum Route {
+    #[route("/")]
+    Home {},
+    #[route("/test")]
+    Test {},
+    #[route("/register")]
+    Register {},
+}
+...
+#[component]
+pub fn Register() -> Element {
+    let mut username = use_signal(|| String::new());
+    let mut password = use_signal(|| String::new());
+    let mut confirm_password = use_signal(|| String::new());
+    let mut response = use_signal(|| String::new());
+
+    rsx! {
+        div { 
+            "{username:?}",
+        }
+        input {
+            placeholder: "Username",
+            oninput: move |event| {
+                username.set(event.value());
+            },
+        }
+        input {
+            placeholder: "Password",
+            oninput: move |event| {
+                password.set(event.value());
+            },
+        }
+        input {
+            placeholder: "confirm_password",
+            oninput: move |event| {
+                password.set(event.value());
+            },
+        }
+    }
+}
+```
+
+Lets also not forget to add our route to the exceptions list so we can visit the page without redirections. Now we can run `dx serve` and visit our new register page over at `http://127.0.0.1:8080/register`
+
+```rs
+fn redirect_page(path: &str) -> bool {
+    let Ok(route) = path.parse::<Route>() else {
+        return true;
+    };
+    matches!(route, Route::Test {} | Route::Register {})
+}
+```
+
+Now when we go over to our register page we can see our login, password and confirm password!. So lets make an account to our new service. But wait, how can we submit our login, We need a button to submit the data and call our backend function to register the user. The dioxus documentation states that you can make use of a `Form<T>` but i consider this bad because its `url-encoded`
+
+So lets just call the function with our `use_signal` hooks
+
+
+```rs
+button {
+    onclick: move |_| async move {
+        response.set(String::new());
+        let server_response = register(
+                username(),
+                password(),
+                confirm_password(),
+            )
+            .await;
+        match server_response {
+            Ok(_) => {
+                navigator().replace(Route::JobList {});
+            }
+            Err(e) => {
+                response.set(format!("{}", e).to_string());
+            }
+        }
+    },
+    "Sign up"
+}
+```
+And just like that we have created our basic registration page! In the logic for our endpoint we take the rowid of the last insertion and just set that as the `auth.login_user` so we should be already logged into the account we just created! Lets quickly modify our homepage to display our current username. We are still being redirected by the middleware we created earlier. Lets change this to an actual auth check that validates the current user to see if they are `userid = 1` 
+
+```rs
+#[cfg(feature = "server")]
+use crate::layer::*;
+
+fn is_unsecured_route(path: &str) -> bool {
+    let Ok(route) = path.parse::<Route>() else {
+        return true;
+    };
+    matches!(route, Route::Register {})
+}
+
+fn is_unsecured_endpoint(path: &str) -> bool {
+    matches!(path, "/api/user/register")
+}
+
+pub async fn auth_check(
+    auth_session: Session, // New axum extractor for our session
+    request: Request, 
+    next: Next
+) -> Response {
+    let path = request.uri().path();
+
+    let is_unsecured_route = is_unsecured_route(path)
+        || is_unsecured_endpoint(path)
+        || path.starts_with("/wasm/") // IMPORTANT; not allowing this will break any dioxus hooks and stop your website from working
+        || path.starts_with("/assets/");
+
+
+    if !is_unsecured_route && !auth_session.is_authenticated() {
+        return Redirect::to(&Route::Register {}.to_string()).into_response();
+    }
+
+    next.run(request).await
+}
+```
+
+Dont forget to rename our middleware in the `main.rs`
+
+```rs
+...
+let router = dioxus::server::router(App)
+        .layer(from_fn(crate::guard::auth_check))
+...
+```
+
+Congratulations. You now have all the tools in the box to write your own auth
+
+## Wrapping up and exercises for the reader
+
+- Adding a login system with a login page and endpoints
+- Whatever your heart can imagine.
+
+
+
