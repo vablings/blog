@@ -4,9 +4,11 @@ plugins:
 author: vablings
 permalink: /:categories/:title/
 
-
+minima:
+  skin: dark  # having no effect
 
 navbar-links:
   Home: ""
   Categories: "categories"
   About: "about"
+
